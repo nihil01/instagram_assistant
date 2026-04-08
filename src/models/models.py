@@ -4,7 +4,7 @@ from sqlalchemy import String, Text, Boolean, ForeignKey, DateTime, Integer, Uni
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from db import Base
+from db.db import Base
 
 
 class InstagramCompany(Base):
@@ -113,3 +113,14 @@ class InstagramWebhookEvent(Base):
     processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class InstagramDataDeletionRequest(Base):
+    __tablename__ = "instagram_data_deletion_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("instagram_companies.id", ondelete="SET NULL"))
+    confirmation_code: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True, nullable=False)
+    request_payload: Mapped[dict | None] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="completed")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

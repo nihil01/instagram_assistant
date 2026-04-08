@@ -1,36 +1,64 @@
+import logging
+
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
-async def upsert_company(db, instagram_account_id, username, name, token, expires_in):
+logger = logging.getLogger(__name__)
 
-    await db.execute(text("""
-    insert into instagram_companies (instagram_account_id, username, display_name)
-    values (:id, :u, :n)
-    on conflict (instagram_account_id)
-    do update set username = :u, display_name = :n
-    """), {"id": instagram_account_id, "u": username, "n": name})
 
-    await db.execute(text("""
-    update instagram_tokens set is_active=false where company_id in (
-        select id from instagram_companies where instagram_account_id=:id
+async def upsert_company(
+    db: AsyncSession,
+    instagram_account_id: str,
+    username: str | None,
+    name: str | None,
+    token: str,
+    expires_in: int,
+) -> None:
+    await db.execute(
+        text(
+            """
+            insert into instagram_companies (instagram_account_id, username, display_name)
+            values (:id, :u, :n)
+            on conflict (instagram_account_id)
+            do update set username = :u, display_name = :n
+            """
+        ),
+        {"id": instagram_account_id, "u": username, "n": name},
     )
-    """), {"id": instagram_account_id})
 
-    await db.execute(text("""
-    insert into instagram_tokens (
-        company_id, access_token, issued_at, expires_at, refresh_after, is_active
+    await db.execute(
+        text(
+            """
+            update instagram_tokens set is_active=false where company_id in (
+                select id from instagram_companies where instagram_account_id=:id
+            )
+            """
+        ),
+        {"id": instagram_account_id},
     )
-    select 
-        id,
-        :token,
-        now(),
-        now() + (:expires_in || ' seconds')::interval,
-        now() + ((:expires_in - 86400) || ' seconds')::interval,
-        true
-    from instagram_companies where instagram_account_id=:id
-    """), {
-        "id": instagram_account_id,
-        "token": token,
-        "expires_in": expires_in
-    })
+
+    await db.execute(
+        text(
+            """
+            insert into instagram_tokens (
+                company_id, access_token, issued_at, expires_at, refresh_after, is_active
+            )
+            select
+                id,
+                :token,
+                now(),
+                now() + (:expires_in || ' seconds')::interval,
+                now() + ((:expires_in - 86400) || ' seconds')::interval,
+                true
+            from instagram_companies where instagram_account_id=:id
+            """
+        ),
+        {
+            "id": instagram_account_id,
+            "token": token,
+            "expires_in": expires_in,
+        },
+    )
 
     await db.commit()
+    logger.info("Company upserted for instagram_account_id=%s username=%s", instagram_account_id, username)

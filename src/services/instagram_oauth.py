@@ -1,6 +1,11 @@
+import logging
+
 import httpx
 from fastapi import HTTPException
+
 from config.app_config import settings as cfg
+
+logger = logging.getLogger(__name__)
 
 
 async def exchange_code_for_token(code: str) -> dict:
@@ -14,16 +19,16 @@ async def exchange_code_for_token(code: str) -> dict:
         "code": code,
     }
 
-    async with httpx.AsyncClient() as client:
-        r = await client.post(url, data=data)
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.post(url, data=data)
 
-    if r.status_code >= 400:
-        raise HTTPException(400, r.text)
+    if response.status_code >= 400:
+        logger.error("exchange_code_for_token failed: %s", response.text)
+        raise HTTPException(400, response.text)
 
-    return r.json()
+    return response.json()
 
 
-# #говно
 async def exchange_long_lived(short_token: str) -> dict:
     url = "https://graph.instagram.com/access_token"
 
@@ -33,17 +38,14 @@ async def exchange_long_lived(short_token: str) -> dict:
         "access_token": short_token,
     }
 
-    print(params)
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(url, params=params)
 
-    async with httpx.AsyncClient() as client:
-        r = await client.get(url, params=params)
+    if response.status_code >= 400:
+        logger.error("exchange_long_lived failed: %s", response.text)
+        raise HTTPException(400, response.text)
 
-    print(r.json())
-
-    if r.status_code >= 400:
-        raise HTTPException(400, r.text)
-
-    return r.json()
+    return response.json()
 
 
 async def get_me(token: str) -> dict:
@@ -54,10 +56,11 @@ async def get_me(token: str) -> dict:
         "access_token": token,
     }
 
-    async with httpx.AsyncClient() as client:
-        r = await client.get(url, params=params)
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(url, params=params)
 
-    if r.status_code >= 400:
-        raise HTTPException(400, r.text)
+    if response.status_code >= 400:
+        logger.error("get_me failed: %s", response.text)
+        raise HTTPException(400, response.text)
 
-    return r.json()
+    return response.json()
