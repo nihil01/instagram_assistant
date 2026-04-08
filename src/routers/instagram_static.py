@@ -1,5 +1,9 @@
-from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Form, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from config.deps import get_db
+from services.chat_runtime import MAX_PROMPT_LENGTH, set_active_prompt_by_username
 
 static_router = APIRouter()
 
@@ -313,3 +317,136 @@ async def delete_data_page():
     </body>
     </html>
     """
+
+@static_router.get("/client", response_class=HTMLResponse)
+async def client_prompt_page():
+    return f"""
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Настройка системного промпта</title>
+        {BASE_HTML_STYLE}
+        <style>
+            .field {{ margin-bottom: 16px; }}
+            .label {{ display: block; margin-bottom: 8px; color: var(--text); font-weight: 700; }}
+            .input, .textarea {{
+                width: 100%;
+                border: 1px solid var(--border);
+                border-radius: 12px;
+                padding: 12px;
+                font-size: 15px;
+            }}
+            .textarea {{ min-height: 180px; resize: vertical; }}
+            .hint {{ color: var(--muted); font-size: 13px; margin-top: 6px; }}
+            .status {{ margin-top: 16px; font-weight: 700; }}
+            .status.ok {{ color: #15803d; }}
+            .status.error {{ color: #b91c1c; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="card">
+                <div class="badge">Кабинет клиента</div>
+                <h1>Системный промпт для Instagram-бота</h1>
+                <p>Введите только username вашей страницы и текст системного промпта.</p>
+                <p>Ограничения: до {MAX_PROMPT_LENGTH} символов, запрещены инструкции для нарушения закона, вредоносных действий и утечки персональных данных.</p>
+
+                <form id="promptForm">
+                    <div class="field">
+                        <label class="label" for="username">Username страницы</label>
+                        <input class="input" type="text" id="username" name="username" maxlength="255" placeholder="например, my_business" required />
+                    </div>
+
+                    <div class="field">
+                        <label class="label" for="prompt_text">Системный промпт</label>
+                        <textarea class="textarea" id="prompt_text" name="prompt_text" maxlength="{MAX_PROMPT_LENGTH}" required></textarea>
+                        <div class="hint">Не указывайте секретные ключи и персональные данные клиентов.</div>
+                    </div>
+
+                    <button class="btn" type="submit">Сохранить</button>
+                    <div id="status" class="status"></div>
+                </form>
+            </div>
+        </div>
+
+        <script>
+            const form = document.getElementById('promptForm');
+            const statusBlock = document.getElementById('status');
+
+            form.addEventListener('submit', async (event) => {{
+                event.preventDefault();
+                statusBlock.className = 'status';
+                statusBlock.textContent = 'Сохраняем...';
+
+                const formData = new FormData(form);
+
+                try {{
+                    const response = await fetch('/client/prompt', {{
+                        method: 'POST',
+                        body: formData,
+                    }});
+
+                    const data = await response.json();
+                    if (!response.ok) {{
+                        statusBlock.classList.add('error');
+                        statusBlock.textContent = data.detail || 'Ошибка при сохранении.';
+                        return;
+                    }}
+
+                    statusBlock.classList.add('ok');
+                    statusBlock.textContent = data.status;
+                }} catch (error) {{
+                    statusBlock.classList.add('error');
+                    statusBlock.textContent = 'Сервис временно недоступен.';
+                }}
+            }});
+        </script>
+    </body>
+    </html>
+    """
+
+
+@static_router.post("/client/prompt")
+async def update_client_prompt(
+    username: str = Form(...),
+    prompt_text: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    username = username.strip().lstrip("@")
+    prompt_text = prompt_text.strip()
+
+    if not username:
+        raise HTTPException(status_code=400, detail="Укажите username страницы")
+
+    if not prompt_text:
+        raise HTTPException(status_code=400, detail="Промпт не может быть пустым")
+
+    if len(prompt_text) > MAX_PROMPT_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Промпт слишком длинный. Максимум {MAX_PROMPT_LENGTH} символов",
+        )
+
+    forbidden_markers = [
+        "ignore safety",
+        "bypass",
+        "steal",
+        "malware",
+        "exfiltrate",
+        "взлом",
+        "обойди ограничения",
+    ]
+
+    normalized = prompt_text.lower()
+    if any(marker in normalized for marker in forbidden_markers):
+        raise HTTPException(
+            status_code=400,
+            detail="Промпт содержит запрещенные инструкции по безопасности",
+        )
+
+    updated = await set_active_prompt_by_username(db, username=username, prompt_text=prompt_text)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Страница с таким username не найдена")
+
+    return JSONResponse({"status": "Системный промпт успешно сохранен"})

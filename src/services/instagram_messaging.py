@@ -1,4 +1,8 @@
+import logging
+
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 async def send_message(
@@ -6,7 +10,7 @@ async def send_message(
     access_token: str,
     recipient_id: str,
     text: str,
-):
+) -> dict:
     url = f"https://graph.instagram.com/v25.0/{instagram_account_id}/messages"
 
     headers = {
@@ -19,7 +23,17 @@ async def send_message(
         "message": {"text": text},
     }
 
-    async with httpx.AsyncClient() as client:
-        r = await client.post(url, headers=headers, json=body)
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.post(url, headers=headers, json=body)
 
-    return r.json()
+    if response.status_code >= 400:
+        logger.error(
+            "Instagram API send failed status=%s body=%s",
+            response.status_code,
+            response.text,
+        )
+        return {}
+
+    result = response.json()
+    logger.info("Instagram message sent to recipient_id=%s", recipient_id)
+    return result
